@@ -15,6 +15,7 @@ public abstract class BinarySearchTreeBase<TKey, TValue, TNode>(IComparer<TKey>?
     
     public bool IsReadOnly => false;
 
+    // итератор самого дерева foreach (var node in tree) => tree.GetEnumerator()
     private class MyTreeEnumerator : IEnumerator<KeyValuePair<TKey, TValue>>
     {
         private readonly IEnumerator<TreeEntry<TKey, TValue>> _inner;
@@ -498,6 +499,12 @@ public abstract class BinarySearchTreeBase<TKey, TValue, TNode>(IComparer<TKey>?
         }
         
         
+
+        // в результате неправильного понимания слова Reverse были реализованы обходы как просто замена Л -> П (симметричный, а не обратный)
+        // чтобы не переписывать код было принято решение вызывать нужные методы:
+        // InOrderReverse -> ПЛК (так и остается как симметричный)
+        // PreOrderReverse -> ПЛК (симметричный PostOrder [ЛПК], тут это считалось как PostOrderReverse)
+        // PostOrderReverse -> КПЛ (симметричный PreOrder [КЛП], тут это считалось как PreOrderReverse)
         public bool MoveNext()
         {
             if (_strategy == TraversalStrategy.PostOrder)
@@ -608,6 +615,7 @@ public abstract class BinarySearchTreeBase<TKey, TValue, TNode>(IComparer<TKey>?
     
     private enum TraversalStrategy { InOrder, PreOrder, PostOrder, InOrderReverse, PreOrderReverse, PostOrderReverse }
     
+    // для foreach по дереву
     public IEnumerator<KeyValuePair<TKey, TValue>> GetEnumerator()
     {
         return new MyTreeEnumerator(InOrder().GetEnumerator());
