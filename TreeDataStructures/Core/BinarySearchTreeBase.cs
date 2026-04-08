@@ -1,4 +1,5 @@
 ﻿using System.Collections;
+using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
 using TreeDataStructures.Interfaces;
 
@@ -383,8 +384,6 @@ public abstract class BinarySearchTreeBase<TKey, TValue, TNode>(IComparer<TKey>?
     {
         private readonly TNode? _root;
         private TNode? _currentNode;
-        private Stack<TNode> _mainStack;
-        private Stack<TNode>? _postOrderStack;
         private readonly TraversalStrategy _strategy;
         private bool _IsFirstMove;
         
@@ -410,84 +409,10 @@ public abstract class BinarySearchTreeBase<TKey, TValue, TNode>(IComparer<TKey>?
         {
             _root = root;
             _strategy = strategy;
-            _mainStack = new Stack<TNode>();
             _currentNode = null;
             _IsFirstMove = true;
-            _postOrderStack = null;
         }
-
-        // InOrder all left sons
-        private void PushLeftBranch(TNode? node)
-        {
-            while (node != null)
-            {
-                _mainStack.Push(node);
-                node = node.Left;
-            }
-        }
-
-        // all right sons
-        private void PushRightBranch(TNode? node)
-        {
-            while (node != null)
-            {
-                _mainStack.Push(node);
-                node = node.Right;
-            }
-        }
-
-        private void PreparePostOrderStack()
-        {
-            if (_root == null) return;
-
-            _postOrderStack = new Stack<TNode>();
-
-            Stack<TNode> tempStack = new Stack<TNode>();
-            tempStack.Push(_root);
-
-            while (tempStack.Count > 0)
-            {
-                TNode current = tempStack.Pop();
-
-                _postOrderStack.Push(current);
-
-                if (current.Left != null)
-                {
-                    tempStack.Push(current.Left);
-                }
-                if (current.Right != null)
-                {
-                    tempStack.Push(current.Right);        
-                }
-            }
-        }
-
-        private void PreparePostOrderReverseStack()
-        {
-            if (_root == null) return;
-
-            _postOrderStack = new Stack<TNode>();
-
-            Stack<TNode> tempStack = new Stack<TNode>();
-            tempStack.Push(_root);
-
-            while (tempStack.Count > 0)
-            {
-                TNode current = tempStack.Pop();
-
-                _postOrderStack.Push(current);
-
-                if (current.Right != null)
-                {
-                    tempStack.Push(current.Right);        
-                }
-                if (current.Left != null)
-                {
-                    tempStack.Push(current.Left);
-                }
-            }
-        }
-
+        
         private int GetHeight(TNode? node)
         {
             if (node == null) return -1;
@@ -498,117 +423,210 @@ public abstract class BinarySearchTreeBase<TKey, TValue, TNode>(IComparer<TKey>?
             return 1 + Math.Max(leftheight, rightheight);
         }
         
-        
-
-        // в результате неправильного понимания слова Reverse были реализованы обходы как просто замена Л -> П (симметричный, а не обратный)
-        // чтобы не переписывать код было принято решение вызывать нужные методы:
-        // InOrderReverse -> ПЛК (так и остается как симметричный)
-        // PreOrderReverse -> ПЛК (симметричный PostOrder [ЛПК], тут это считалось как PostOrderReverse)
-        // PostOrderReverse -> КПЛ (симметричный PreOrder [КЛП], тут это считалось как PreOrderReverse)
         public bool MoveNext()
         {
-            if (_strategy == TraversalStrategy.PostOrder)
-            {
-                if (_postOrderStack == null)
-                {
-                    PreparePostOrderStack();
-                }
-
-                if (_postOrderStack == null || _postOrderStack.Count == 0)
-                {
-                    return false;
-                }
-
-                _currentNode = _postOrderStack.Pop();
-                return true;
-            }
-            if (_strategy == TraversalStrategy.PreOrderReverse)
-            {
-                if (_postOrderStack == null)
-                {
-                    PreparePostOrderReverseStack();
-                }
-                
-                if (_postOrderStack == null || _postOrderStack.Count == 0)
-                    return false;
-                
-                _currentNode = _postOrderStack?.Pop();
-                return true;
-            }
             if (_IsFirstMove)
             {
                 _IsFirstMove = false;
+
                 switch (_strategy)
                 {
-                    case TraversalStrategy.InOrder:
-                        PushLeftBranch(_root);
+                    case TraversalStrategy.InOrder:             // ЛКП
+                        _currentNode = GoLeft(_root);
                         break;
-                    case TraversalStrategy.InOrderReverse:
-                        PushRightBranch(_root);
+                    case TraversalStrategy.InOrderReverse:      // ПКЛ
+                        _currentNode = GoRight(_root);
                         break;
-                    
-                    case TraversalStrategy.PreOrder:
-                    case TraversalStrategy.PostOrderReverse:
-                        if (_root != null) _mainStack.Push(_root);
+                    case TraversalStrategy.PreOrder:            // КЛП
+                        _currentNode = _root;
+                        break;
+                    case TraversalStrategy.PreOrderReverse:     // ПЛК
+                        _currentNode = GetPreOrderLast(_root);
+                        break;
+                    case TraversalStrategy.PostOrder:           // ЛПК
+                        _currentNode = GetPostOrderFirst(_root);
+                        break;
+                    case TraversalStrategy.PostOrderReverse:           // КПЛ
+                        _currentNode = _root;
                         break;
                 }
+
+                return _currentNode != null;
             }
 
-            if (_mainStack.Count == 0) return false;
-
-            _currentNode = _mainStack.Pop();
+            if (_currentNode == null) return false;
 
             switch (_strategy)
             {
                 case TraversalStrategy.InOrder:
-                    if (_currentNode.Right != null)
-                        PushLeftBranch(_currentNode.Right);
+                    if (_currentNode.Right != null) _currentNode = GoLeft(_currentNode.Right);
+                    else _currentNode = GoUpWhileRight(_currentNode);
                     break;
-
                 case TraversalStrategy.InOrderReverse:
-                    if (_currentNode.Left != null) 
-                        PushRightBranch(_currentNode.Left);
+                    if (_currentNode.Left != null) _currentNode = GoRight(_currentNode.Left);
+                    else _currentNode = GoUpWhileLeft(_currentNode);
                     break;
-
                 case TraversalStrategy.PreOrder:
-                    if (_currentNode.Right != null)
-                        _mainStack.Push(_currentNode.Right);
-                    if (_currentNode.Left != null)
-                        _mainStack.Push(_currentNode.Left);
+                    _currentNode = NextPreOrder(_currentNode);
                     break;
-
+                case TraversalStrategy.PreOrderReverse:
+                    _currentNode = PrevPreOrder(_currentNode);
+                    break;
+                case TraversalStrategy.PostOrder:
+                    _currentNode = NextPostOrder(_currentNode);
+                    break;
                 case TraversalStrategy.PostOrderReverse:
-                    if (_currentNode.Left != null)
-                        _mainStack.Push(_currentNode.Left);
-                    if (_currentNode.Right != null)
-                        _mainStack.Push(_currentNode.Right);
+                    _currentNode = PrevPostOrder(_currentNode);
                     break;
             }
 
-            return true;
+            return _currentNode != null;
+        }
+
+        private TNode? GoLeft(TNode? node)
+        {
+            while (node != null && node.Left != null)
+            {
+                node = node.Left;
+            }
+            return node;
+        }
+
+        private TNode? GoRight(TNode? node)
+        {
+            while (node != null && node.Right != null)
+            {
+                node = node.Right;
+            }
+            return node;
+        }
+
+        private TNode? GoUpWhileRight(TNode? node)
+        {
+            var parent = node?.Parent;
+            while (parent != null && node == parent.Right)
+            {
+                node = parent;
+                parent = node.Parent;
+            }
+            return parent;
+        }
+
+        private TNode? GoUpWhileLeft(TNode? node)
+        {
+            var parent = node?.Parent;
+            while (parent != null && node == parent.Left)
+            {
+                node = parent;
+                parent = node.Parent;
+            }
+            return parent;
+        }
+
+        private TNode? NextPreOrder(TNode? current)
+        {
+            if (current == null) return null;
+            if (current.Left != null) return current.Left;
+            if (current.Right != null) return current.Right;
+            
+            var parent = current.Parent;
+            while (parent != null)
+            {
+                if (parent.Left == current && parent.Right != null) return parent.Right;
+                current = parent;
+                parent = current.Parent;
+            }
+            return null;
+        }
+
+        private TNode? GetPostOrderFirst(TNode? node)
+        {
+            while (node != null && (node.Left != null || node.Right != null))
+            {
+                node = node.Left ?? node.Right;
+            }
+            return node;
+        }
+
+        private TNode? GetPreOrderLast(TNode? node)
+        {
+            while (node != null)
+            {
+                if (node.Right != null) node = node.Right;
+                else if (node.Left != null) node = node.Left;
+                else break;
+            }
+            return node;
+        }
+
+        private TNode? PrevPostOrder(TNode? current)
+        {
+            if (current == null) return null;
+
+            if (current.Right != null)
+                return current.Right;
+            if (current.Left != null)
+                return current.Left;
+
+            var parent = current.Parent;
+            if (parent == null) return null;
+
+            if (parent.Right == current)
+            {
+                return parent.Left ?? parent;
+            }
+
+            while (parent != null && parent.Left == current)
+            {
+                current = parent;
+                parent = current.Parent;
+            }
+
+            if (parent == null) return null;
+
+            return parent.Left ?? parent;
+        }
+
+        private TNode? PrevPreOrder(TNode? current)
+        {
+            if (current == null || current == _root) return null;
+            
+            var parent = current.Parent;
+            if (parent == null) return null;
+            if (parent.Right == current)
+            {
+                return parent.Left != null ? GetPreOrderLast(parent.Left) : parent;
+            }
+            else if (parent.Left == current)
+            {
+                return parent;
+            }
+            
+            return null;
+        }
+
+        private TNode? NextPostOrder(TNode? current)
+        {
+            var parent = current?.Parent;
+            if (parent == null) return null;
+            
+            if (parent.Left == current && parent.Right != null)
+                return GetPostOrderFirst(parent.Right);
+            
+            return parent;
         }
         
         public void Reset()
         {
-            _mainStack.Clear();
             _currentNode = null;
             _IsFirstMove = true;
-
-            if (_postOrderStack != null)
-            {
-                _postOrderStack.Clear();
-            }
         }
 
         
         public void Dispose()
         {
-            _mainStack.Clear();
             _currentNode = null;
-            if (_postOrderStack != null)
-            {
-                _postOrderStack.Clear();
-            }
+            _IsFirstMove = true;
         }
     }
     
