@@ -182,7 +182,7 @@ public abstract class BinarySearchTreeBase<TKey, TValue, TNode>(IComparer<TKey>?
             node.Key = minRightkey;
             node.Value = minRightvalue;
 
-            OnNodeRemoved(node.Parent, node);
+            OnNodeRemoved(node.Parent, minRight);
         }
     }
 
@@ -441,12 +441,12 @@ public abstract class BinarySearchTreeBase<TKey, TValue, TNode>(IComparer<TKey>?
                         _currentNode = _root;
                         break;
                     case TraversalStrategy.PreOrderReverse:     // ПЛК
-                        _currentNode = GetPreOrderLast(_root);
+                        _currentNode = GetPreOrderReverseFirst(_root);
                         break;
                     case TraversalStrategy.PostOrder:           // ЛПК
                         _currentNode = GetPostOrderFirst(_root);
                         break;
-                    case TraversalStrategy.PostOrderReverse:           // КПЛ
+                    case TraversalStrategy.PostOrderReverse:    // КПЛ
                         _currentNode = _root;
                         break;
                 }
@@ -470,13 +470,13 @@ public abstract class BinarySearchTreeBase<TKey, TValue, TNode>(IComparer<TKey>?
                     _currentNode = NextPreOrder(_currentNode);
                     break;
                 case TraversalStrategy.PreOrderReverse:
-                    _currentNode = PrevPreOrder(_currentNode);
+                    _currentNode = NextPreOrderReverse(_currentNode);
                     break;
                 case TraversalStrategy.PostOrder:
                     _currentNode = NextPostOrder(_currentNode);
                     break;
                 case TraversalStrategy.PostOrderReverse:
-                    _currentNode = PrevPostOrder(_currentNode);
+                    _currentNode = NextPostOrderReverse(_currentNode);
                     break;
             }
 
@@ -548,61 +548,40 @@ public abstract class BinarySearchTreeBase<TKey, TValue, TNode>(IComparer<TKey>?
             return node;
         }
 
-        private TNode? GetPreOrderLast(TNode? node)
+        private TNode? GetPreOrderReverseFirst(TNode? node)
         {
-            while (node != null)
+            while (node != null && (node.Right != null || node.Left != null))
             {
-                if (node.Right != null) node = node.Right;
-                else if (node.Left != null) node = node.Left;
-                else break;
+                node = node.Right ?? node.Left;
             }
             return node;
         }
 
-        private TNode? PrevPostOrder(TNode? current)
+        private TNode? NextPostOrderReverse(TNode? current)
         {
             if (current == null) return null;
-
-            if (current.Right != null)
-                return current.Right;
-            if (current.Left != null)
-                return current.Left;
-
+            if (current.Right != null) return current.Right;
+            if (current.Left != null) return current.Left;
+            
             var parent = current.Parent;
-            if (parent == null) return null;
-
-            if (parent.Right == current)
+            while (parent != null)
             {
-                return parent.Left ?? parent;
-            }
-
-            while (parent != null && parent.Left == current)
-            {
+                if (parent.Right == current && parent.Left != null) return parent.Left;
                 current = parent;
                 parent = current.Parent;
             }
-
-            if (parent == null) return null;
-
-            return parent.Left ?? parent;
+            return null;
         }
 
-        private TNode? PrevPreOrder(TNode? current)
+        private TNode? NextPreOrderReverse(TNode? current)
         {
-            if (current == null || current == _root) return null;
-            
-            var parent = current.Parent;
+            var parent = current?.Parent;
             if (parent == null) return null;
-            if (parent.Right == current)
-            {
-                return parent.Left != null ? GetPreOrderLast(parent.Left) : parent;
-            }
-            else if (parent.Left == current)
-            {
-                return parent;
-            }
             
-            return null;
+            if (parent.Right == current && parent.Left != null)
+                return GetPreOrderReverseFirst(parent.Left);
+            
+            return parent;
         }
 
         private TNode? NextPostOrder(TNode? current)
