@@ -11,6 +11,10 @@ public sealed class BetterBigInteger : IBigInteger
     private uint[]? _data;
     
     public bool IsNegative => _signBit == 1;
+
+    private static readonly uint halfBase = 1u << 16;
+    private static readonly uint maskFirst16 = halfBase - 1;
+    private static readonly int halfDigitBits = 16;
     
     /// От массива цифр (little endian)
     public BetterBigInteger(uint[] digits, bool isNegative = false)
@@ -57,7 +61,9 @@ public sealed class BetterBigInteger : IBigInteger
             throw new ArgumentException("value can't be only a sign");
         }
 
-        List<uint> words = new List<uint>();
+        BetterBigInteger result = new BetterBigInteger(new uint[] { 0 });
+        BetterBigInteger baseValue = new BetterBigInteger(new uint[] { (uint)radix });
+
         for (; index < value.Length; index++)
         {
             int digit = GetDigitValue(value[index]);
@@ -66,22 +72,14 @@ public sealed class BetterBigInteger : IBigInteger
             {
                 throw new ArgumentException($"Invalid symbol '{value[index]}' for radix {radix}");
             }
-
-            ulong carry = (uint)digit;
-            for (int j = 0; j < words.Count; j++)
-            {
-                ulong current = (ulong)words[j] * (uint)radix + carry;
-                words[j] = (uint)current;
-                carry = current >> 32;
-            }
-            if (carry != 0)
-            {
-                words.Add((uint)carry);
-            }
+            result = result * baseValue + new BetterBigInteger(new uint[] { (uint)digit });
         }
 
-        uint[] digitsArray = words.ToArray();
-        InitFromDigits(digitsArray, isNegative);
+        _smallValue = result._smallValue;
+        _data = result._data;
+        _signBit = isNegative ? 1 : 0;
+        
+        if (IsZero(GetDigits())) _signBit = 0;
     }    
     
     public ReadOnlySpan<uint> GetDigits()
@@ -249,56 +247,35 @@ public sealed class BetterBigInteger : IBigInteger
 
     public static BetterBigInteger operator &(BetterBigInteger a, BetterBigInteger b)
     {
-        if (a is null) throw new ArgumentNullException("a can't be null");
-        if (b is null) throw new ArgumentNullException("b can't be null");
-
-        int length = Math.Max(a.GetDigits().Length, b.GetDigits().Length) + 1;
-
-        uint[] left = ToTwosComplement(a.GetDigits(), a.IsNegative, length);
-        uint[] right = ToTwosComplement(b.GetDigits(), b.IsNegative, length);
-
-        uint[] result = new uint[length];
-
-        for (int i = 0; i < length; i++)
-        {
-            result[i] = left[i] & right[i];
-        }
-        return FromTwosComplement(result);
+        return BitwiseBinary(a, b, (x, y) => x & y);
     }
     public static BetterBigInteger operator |(BetterBigInteger a, BetterBigInteger b)
     {
-        if (a is null) throw new ArgumentNullException("a can't be null");
-        if (b is null) throw new ArgumentNullException("b can't be null");
-
-        int length = Math.Max(a.GetDigits().Length, b.GetDigits().Length) + 1;
-
-        uint[] left = ToTwosComplement(a.GetDigits(), a.IsNegative, length);
-        uint[] right = ToTwosComplement(b.GetDigits(), b.IsNegative, length);
-
-        uint[] result = new uint[length];
-
-        for (int i = 0; i < length; i++)
-        {
-            result[i] = left[i] | right[i];
-        }
-        return FromTwosComplement(result);
+        return BitwiseBinary(a, b, (x, y) => x | y);
     }
     public static BetterBigInteger operator ^(BetterBigInteger a, BetterBigInteger b)
     {
-        if (a is null) throw new ArgumentNullException("a can't be null");
-        if (b is null) throw new ArgumentNullException("b can't be null");
+        return BitwiseBinary(a, b, (x, y) => x ^ y);
+    }
+
+    private static BetterBigInteger BitwiseBinary(BetterBigInteger a, BetterBigInteger b,
+        Func<uint, uint, uint> operation)
+    {
+        if (a is null) throw new ArgumentNullException(nameof(a));
+        if (b is null) throw new ArgumentNullException(nameof(b));
 
         int length = Math.Max(a.GetDigits().Length, b.GetDigits().Length) + 1;
-
-        uint[] left = ToTwosComplement(a.GetDigits(), a.IsNegative, length);
-        uint[] right = ToTwosComplement(b.GetDigits(), b.IsNegative, length);
-
+        
+        uint[] ad = ToTwosComplement(a.GetDigits(), a.IsNegative, length);
+        uint[] bd = ToTwosComplement(b.GetDigits(), b.IsNegative, length);
+        
         uint[] result = new uint[length];
-
+        
         for (int i = 0; i < length; i++)
         {
-            result[i] = left[i] ^ right[i];
+            result[i] = operation(ad[i], bd[i]);
         }
+        
         return FromTwosComplement(result);
     }
 
@@ -432,54 +409,90 @@ public sealed class BetterBigInteger : IBigInteger
         int maxlength = Math.Max(a.Length, b.Length);
         uint[] result = new uint[maxlength + 1];
 
-        ulong carry = 0;
+        uint acc = 0;
 
         for (int i = 0; i < maxlength; i++)
         {
-            ulong x = i < a.Length ? a[i] : 0;
-            ulong y = i < b.Length ? b[i] : 0;
+            uint x = i < a.Length ? a[i] : 0;
+            uint y = i < b.Length ? b[i] : 0;
 
-            ulong sum = x + y + carry;
-
-            result[i] = (uint)sum;
-            carry = sum >> 32;
+            result[i] = AddUints(x, y, ref acc);
         }
 
-        if (carry != 0)
-        {
-            result[maxlength] = (uint)carry;
-        }
+        result[maxlength] = acc;
 
         return result;
+    }
+
+    private static uint AddUints(uint x, uint y, ref uint acc)
+    {
+        uint xLow = x & maskFirst16;
+        uint xHigh = x >> halfDigitBits;
+
+        uint yLow = y & maskFirst16;
+        uint yHigh = y >> halfDigitBits;
+
+        uint lowSum = xLow + yLow + acc;
+        uint resultLow = lowSum & maskFirst16;
+        uint accFromLow = lowSum >> halfDigitBits;
+
+        uint highSum = yHigh + xHigh + accFromLow;
+        uint resultHigh = highSum & maskFirst16;
+
+        acc = highSum >> halfDigitBits;
+
+        return (resultHigh << halfDigitBits) | resultLow;
     }
 
     private static uint[] SubtractAbs(ReadOnlySpan<uint> bigger, ReadOnlySpan<uint> smaller)
     {
         uint[] result = new uint[bigger.Length];
-
-        long borrow = 0;
+        uint borrow = 0;
 
         for (int i = 0; i < bigger.Length; i++) 
         {
-            long x = bigger[i];
-            long y = i < smaller.Length ? smaller[i] : 0;
+            uint x = bigger[i];
+            uint y = i < smaller.Length ? smaller[i] : 0;
 
-            long diff = x - y - borrow;
-
-            if (diff < 0) 
-            {
-                diff += (1L << 32);
-                borrow = 1;
-            }
-            else 
-            {
-                borrow = 0;
-            }
-
-            result[i] = (uint)diff;
+            result[i] = SubUints(x, y, ref borrow);
         }
 
         return result;
+    }
+
+    private static uint SubUints(uint x, uint y, ref uint borrow)
+    {
+        uint xLow = x & maskFirst16;
+        uint xHigh = x >> halfDigitBits;
+
+        uint yLow = y & maskFirst16;
+        uint yHigh = y >> halfDigitBits;
+
+        uint borrowForLow, lowSub, highSub;
+
+        if (xLow >= yLow + borrow)
+        {
+            lowSub = xLow - yLow - borrow;
+            borrowForLow = 0;
+        } 
+        else
+        {
+            lowSub = halfBase + xLow - yLow - borrow;
+            borrowForLow = 1;
+        }
+
+        if (xHigh >= yHigh + borrowForLow)
+        {
+            highSub = xHigh - yHigh - borrowForLow;
+            borrow = 0;
+        } 
+        else
+        {
+            highSub = halfBase + xHigh - yHigh - borrowForLow;
+            borrow = 1;
+        }
+
+        return (highSub << halfDigitBits) | lowSub;
     }
 
     private static int CompareAbs(ReadOnlySpan<uint> a, ReadOnlySpan<uint> b)
@@ -533,34 +546,31 @@ public sealed class BetterBigInteger : IBigInteger
     {
         if (shift == 0) return digits.ToArray();
 
-        if (digits.Length == 1 && digits[0] == 0) return new uint[] { 0 };
+        if (IsZero(digits)) return new uint[] { 0 };
 
         int wordShift = shift / 32;
         int bitShift = shift % 32;
 
         uint[] result = new uint[digits.Length + wordShift + 1];
+        uint carry = 0;
 
-        ulong carry = 0;
         for (int i = 0; i < digits.Length; i++)
         {
-            ulong current = ((ulong)digits[i] << bitShift) | carry;
-            result[i + wordShift] = (uint)current;
-            carry = current >> 32;
+            uint current = digits[i];
+            result[i + wordShift] = (current << bitShift) | carry;
+            carry = (bitShift == 0) ? 0 : (current >> (32 - bitShift));
         }
 
-        if (carry != 0)
-        {
-            result[digits.Length + wordShift] = (uint)carry;
-        }
-
-        return result;
+        result[digits.Length + wordShift] = carry;
+    
+        return TrimHighZeros(result);
     }
 
     private static uint[] ShiftRightAbs(ReadOnlySpan<uint> digits, int shift)
     {
         if (shift == 0) return digits.ToArray();
 
-        if (digits.Length == 1 && digits[0] == 0) return new uint[] { 0 };
+        if (IsZero(digits)) return new uint[] { 0 };
 
         int wordShift = shift / 32;
         int bitShift = shift % 32;
@@ -577,7 +587,7 @@ public sealed class BetterBigInteger : IBigInteger
                 result[i] = digits[i + wordShift];
             }
 
-            return result;
+            return TrimHighZeros(result);
         }
 
         uint BitsFromHigherWord = 0;
@@ -589,7 +599,7 @@ public sealed class BetterBigInteger : IBigInteger
             BitsFromHigherWord = current << (32 - bitShift);
         }
 
-        return result;
+        return TrimHighZeros(result);
     }
 
     private static bool HasLostBitsOnRightShift(ReadOnlySpan<uint> digits, int shift)
@@ -615,25 +625,6 @@ public sealed class BetterBigInteger : IBigInteger
         uint mask = (uint)((1UL << bitShift) - 1);
 
         return (digits[wordShift] & mask) != 0;
-    }
-
-    private static uint[] AddOneAbs(uint[] digits)
-    {
-        uint[] result = new uint[digits.Length + 1];
-        Array.Copy(digits, result, digits.Length);
-
-        ulong carry = 1;
-        for (int i = 0; i < result.Length; i++)
-        {
-            ulong current = (ulong)result[i] + carry;
-            result[i] = (uint)current;
-            carry = current >> 32;
-
-            if (carry == 0)
-                break;
-        }
-
-        return result;
     }
 
     private static uint[] ToTwosComplement(ReadOnlySpan<uint> digits, bool isNegative, int length)
@@ -678,19 +669,44 @@ public sealed class BetterBigInteger : IBigInteger
         return new BetterBigInteger(digits, true);
     }
 
+    private static uint[] AddOneAbs(uint[] digits)
+    {
+        uint[] result = new uint[digits.Length + 1];
+        Array.Copy(digits, result, digits.Length);
+
+        uint acc = 1;
+        for (int i = 0; i < result.Length && acc != 0; i++)
+        {
+            result[i] = IncrementUint(result[i], ref acc);
+        }
+
+        return TrimHighZeros(result);
+    }
+
     private static void AddOneFixed(uint[] digits)
     {
-        ulong carry = 1;
-
-        for (int i = 0; i < digits.Length; i++)
+        uint acc = 1;
+        for (int i = 0; i < digits.Length && acc != 0; i++)
         {
-            ulong current = (ulong)digits[i] + carry;
-            digits[i] = (uint)current;
-            carry = current >> 32;
-
-            if (carry == 0)
-                return;
+            digits[i] = IncrementUint(digits[i], ref acc);
         }
+    }
+
+    private static uint IncrementUint(uint x, ref uint acc)
+    {
+        uint xLow = x & maskFirst16;
+        uint xHigh = x >> halfDigitBits;
+
+        uint lowSum = xLow + acc;
+        uint resultLow = lowSum & maskFirst16;
+        uint accFromlow = lowSum >> halfDigitBits;
+
+        uint highSum = xHigh + accFromlow;
+        uint reslutHigh = highSum & maskFirst16;
+
+        acc = highSum >> halfDigitBits;
+
+        return (reslutHigh << halfDigitBits) | resultLow;
     }
 
     private static bool IsZero(ReadOnlySpan<uint> digits)

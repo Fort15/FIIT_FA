@@ -4,6 +4,9 @@ namespace Arithmetic.BigInt.MultiplyStrategy;
 
 internal class KaratsubaMultiplier : IMultiplier
 {
+    private static readonly uint halfBase = 1u << 16;
+    private static readonly uint maskFirst16 = halfBase - 1;
+    private static readonly int halfDigitBits = 16;
     public BetterBigInteger Multiply(BetterBigInteger a, BetterBigInteger b)
     {
         if (a is null) throw new ArgumentNullException("a can't be null");
@@ -25,14 +28,8 @@ internal class KaratsubaMultiplier : IMultiplier
 
         if (A.Length == 1 && B.Length == 1)
         {
-            ulong product = (ulong)A[0] * B[0];
-
-            uint firstDigit = (uint)product;
-            uint secondDigit = (uint)(product >> 32);
-
-            if (secondDigit == 0) return new uint[] { firstDigit };
-
-            return new uint[] { firstDigit, secondDigit };
+            MulUint(A[0], B[0], out uint low, out uint high);
+            return high == 0 ? new uint[] { low } : new uint[] { low, high };
         }
 
         int n = Math.Max(A.Length, B.Length);
@@ -61,6 +58,37 @@ internal class KaratsubaMultiplier : IMultiplier
         result = BetterBigInteger.AddMagnitudes(result, shiftedA1B1);
 
         return BetterBigInteger.TrimMagnitude(result);
+    }
+
+    private static void MulUint(uint a, uint b, out uint low, out uint high)
+    {
+        uint aLow = a & maskFirst16, aHigh = a >> halfDigitBits;
+        uint bLow = b & maskFirst16, bHigh = b >> halfDigitBits;
+
+        uint mul1 = aLow * bLow;
+        uint mul2 = aLow * bHigh;
+        uint mul3 = aHigh * bLow;
+        uint mul4 = aHigh * bHigh;
+
+        uint mul1Low = mul1 & maskFirst16, mul1High = mul1 >> halfDigitBits;
+        uint mul2Low = mul2 & maskFirst16, mul2High = mul2 >> halfDigitBits;
+        uint mul3Low = mul3 & maskFirst16, mul3High = mul3 >> halfDigitBits;
+        uint mul4Low = mul4 & maskFirst16, mul4High = mul4 >> halfDigitBits;
+
+        uint middleSum = mul1High + mul2Low + mul3Low;
+        uint middleLow = middleSum & maskFirst16;
+        uint middleAcc = middleSum >> halfDigitBits;
+
+        low = (middleLow << halfDigitBits) | mul1Low;
+
+        uint highLowPart = mul2High + mul3High + mul4Low + middleAcc;
+
+        uint highLowResult = highLowPart & maskFirst16;
+        uint highLowCarry = highLowPart >> halfDigitBits;
+
+        uint highHighPart = mul4High + highLowCarry;
+        
+        high = (highHighPart << halfDigitBits) | highLowResult;
     }
 
     private static ReadOnlySpan<uint> TrimHighZeros(ReadOnlySpan<uint> digits)
