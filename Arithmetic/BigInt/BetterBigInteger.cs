@@ -224,10 +224,22 @@ public sealed class BetterBigInteger : IBigInteger
     
     public static BetterBigInteger operator *(BetterBigInteger a, BetterBigInteger b) 
     {
-        if (a is null) throw new ArgumentNullException("a can't be null");
-        if (b is null) throw new ArgumentNullException("b can't be null");
+        int aLen = a.GetDigits().Length;
+        int bLen = b.GetDigits().Length;
+        int maxSize = Math.Max(aLen, bLen);
 
-        return new SimpleMultiplier().Multiply(a, b);
+        if (maxSize < 32)
+        {
+            return new SimpleMultiplier().Multiply(a, b);
+        }
+        else if (maxSize < 512)
+        {
+            return new KaratsubaMultiplier().Multiply(a, b);
+        }
+        else
+        {
+            return new FftMultiplier().Multiply(a, b);
+        }
     }
     
     public static BetterBigInteger operator ~(BetterBigInteger a)
